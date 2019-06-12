@@ -2,6 +2,7 @@ library(nycflights13)
 library(dplyr)
 library(stringr)
 library(infer)
+library(boot)
 
 # https://github.com/topepo/infer
 # https://github.com/topepo/infer/tree/master/vignettes
@@ -98,14 +99,25 @@ output %>% summarize(std_error = (conf.high - estimate) / 1.96)
 #################
 
 
-# get conf_int for diff_in_means with boostrap method
-observed_diff_in_means <- fli_small %>% specify(arr_delay ~ half_year) %>% calculate(stat = "diff in means", order = c("h1", "h2"))
+# get conf_int for diff_in_means with bootstrap method
+# note, I'm removing NA values to try and get infer's bootstrap conf_ints to match the boot package
+# initially there was a difference, which I thought might because infer and boot handle NA's differently?
+# results: dropping NA's didn't have an effect- infer still gets slightly different results than boot
+# infer CI: -3.9ish to 10.2ish; boot CI: -2.2ish to 8.4ish (even boot's percentile and normal CI methods) 
+# for some reason infer seems more conservative, giving wider CI
+observed_diff_in_means <- fli_small %>% select(arr_delay, half_year) %>% 
+        filter(!is.na(arr_delay), !is.na(half_year)) %>%
+        specify(arr_delay ~ half_year) %>% 
+        calculate(stat = "diff in means", order = c("h1", "h2"))
 observed_diff_in_means
 
 # get bootstrap_distn for diff in means
 # bootstrap just takes resamples of data with replacement (same number of observations), then calculates the diff_in_means on these replicates
 # the collection of these diff_in_means across replicates creates diff_in_means sampling distro
-diff_in_means_bootstrap_dist <- fli_small %>% specify(arr_delay ~ half_year) %>% generate(reps = 100, type = "bootstrap") %>%
+diff_in_means_bootstrap_dist <- fli_small %>% 
+        select(arr_delay, half_year) %>% 
+        filter(!is.na(arr_delay), !is.na(half_year)) %>%
+        specify(arr_delay ~ half_year) %>% generate(reps = 2000, type = "bootstrap") %>%
         calculate(stat = "diff in means", order = c("h1", "h2"))
 diff_in_means_bootstrap_dist
 
@@ -113,13 +125,54 @@ diff_in_means_bootstrap_dist
 diff_in_means_bootstrap_dist %>% visualize()
 
 # get conf_int for diff_in_means
-# conf_int using randomized bootstrap diff_in_means distro method
-diff_in_means_bootstrap_dist %>% conf_int(level = 0.95)
+# conf_int using randomized bootstrap diff_in_means percentile method
+diff_in_means_bootstrap_dist %>% conf_int(level = 0.95, type = "percentile")
+diff_in_means_bootstrap_dist %>% 
+        summarize(quantiles = list(enframe(quantile(x = stat, probs = c(.025, .975))))) %>% unnest()
 
 # conf_int using theoretical 1.96 * std_error method
-# std_error is measure of precision of estimate, calculated as the standard deviation of the estimate's sampling distribution
-diff_in_means_bootstrap_dist %>% summarize(se = sd(stat), conf_int_lower = d_hat$stat - 1.96*se, conf_int_upper = d_hat$stat + 1.96*se)
-diff_in_means_bootstrap_dist %>% conf_int(type = "se", point_estimate = d_hat)
+# std_error is measure of precision of estimate, 
+# calculated as the standard deviation of the estimate's sampling distribution
+diff_in_means_bootstrap_dist %>% 
+        summarize(se = sd(stat), 
+                  conf_int_lower = observed_diff_in_means$stat - 1.96 * se, 
+                  conf_int_upper = observed_diff_in_means$stat + 1.96 * se)
+diff_in_means_bootstrap_dist %>% conf_int(type = "se", point_estimate = observed_diff_in_means)
+
+
+##################
+
+
+# get bootstrap confidence interval using boot package, 
+# which can provide the fancier and supposedly better Bias Corrected and Accelerated (BCA) bootstrap confidence interval
+# in addition to the standard error version and percentile version
+# though as discussed above, note that boot CI seems to be more narrow than infer, even for percentile and normal methods
+# http://users.stat.umn.edu/~helwig/notes/bootci-Notes.pdf
+
+# note for the boot package, you have to write a function taking the data argument and the 
+# bootstrapped indices argument.  then subset the data to just the indices, compute the statistic, and return results
+diff_in_mean_arr_delay <- function(data, indices) {
+        h1_mean_arr_delay <- data %>% filter(half_year == "h1") %>%
+                filter(row_number() %in% indices) %>% 
+                summarize(mean_arr_delay = mean(arr_delay, na.rm = TRUE)) %>% 
+                pull(mean_arr_delay)
+        h2_mean_arr_delay <- data %>% filter(half_year == "h2") %>%
+                filter(row_number() %in% indices) %>% 
+                summarize(mean_arr_delay = mean(arr_delay, na.rm = TRUE)) %>%
+                pull(mean_arr_delay)
+        return(h1_mean_arr_delay - h2_mean_arr_delay)
+}
+
+set.seed(123) 
+# use the same random number sequence each time for 
+# resampling each time by setting a seed value.
+# this gives reproducible results
+diff_in_mean_arr_delay_boot_obj <- boot(data = fli_small, statistic = diff_in_mean_arr_delay, R = 2000)
+diff_in_mean_arr_delay_boot_obj
+attributes(diff_in_mean_arr_delay_boot_obj)
+
+bca_conf_int <- boot.ci(diff_in_mean_arr_delay_boot_obj, conf = 0.95)
+bca_conf_int
 
 
 ##################
@@ -270,7 +323,7 @@ mtcars_df %>% group_by(vs) %>% summarize(am_prop = mean(as.numeric(as.character(
         mutate(diff_in_props = am_prop_1 - am_prop_0)
 
 #get diff_in_props with permute
-diff_in_props_distro_null_hypoth <- mtcars %>%
+diff_in_props_distro_null_hypoth <- mtcars %>% mutate(am = as.character(am), vs = as.character(vs)) %>%
         specify(am ~ vs, success = "1") %>%
         hypothesize(null = "independence") %>%
         generate(reps = 100, type = "permute") %>%
