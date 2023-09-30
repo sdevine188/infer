@@ -332,3 +332,58 @@ diff_in_props_distro_null_hypoth
 
 # visualize diff_in_props_distro_null_hypoth
 diff_in_props_distro_null_hypoth %>% visualize()
+
+
+#///////////////////////////////////////////////////////////////////////////////////////
+
+
+# simplified prop test with infer::prop_test vs base prop.test
+# note that prop_test is useful in taking tidy record-level data, instead of prop.test which requires
+# vector of two samples trials and successes
+# but prop_test provides less info in output than prop.test + tidy()
+
+
+# note that under the hood, prop_test calls table() on response and explanatory variables and passes that to prop.test()
+# sum_table <- x %>% select(response_name(x), explanatory_name(x)) %>% 
+#         table()
+# sum_table <- sum_table[lvls, order]
+# prelim <- stats::prop.test(x = sum_table, alternative = alternative, 
+#                            conf.level = conf_level, p = p, correct = correct, 
+#                            ...)
+
+
+# use prop_test (with or without formula syntax)
+prop_test(gss,
+          college ~ sex,
+          order = c("female", "male"))
+prop_test(gss,
+          response = college, 
+          explanatory = sex,
+          order = c("female", "male"))
+
+# manually get diff_in_proportion
+gss %>% mutate(degree_flag = case_when(college == "degree" ~ 1,
+                                       TRUE ~ 0)) %>%
+        group_by(sex) %>%
+        mutate(n = n(),
+               degree_complete = sum(degree_flag),
+               degree_share = degree_complete / n) %>%
+        ungroup() %>%
+        distinct(sex, n, degree_complete, degree_share)
+
+gss %>% select(sex, college) %>% table()
+gss %>% janitor::tabyl(sex, college)
+
+
+# confirm answer with prop.test using vector of two sample successes and trials (not record-level tidy data like prop_test)
+library(broom)
+prop.test(x = c(91, 83), n = c(263, 237), alternative = "two.sided") %>% tidy()
+
+# note that prop_test will drop unused levels for a categorical variable 
+prop_test(gss,
+          college ~ partyid,
+          order = c("dem", "rep"))
+
+
+
+
