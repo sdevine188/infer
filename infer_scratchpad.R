@@ -384,6 +384,9 @@ prop_test(gss,
           college ~ partyid,
           order = c("dem", "rep"))
 
+# note that prop.test doesn't change depending on the designation of whether 1 or 0 equals a "success"
+prop.test(x = c(25, 50), n = c(100, 100), alternative = "two.sided")
+prop.test(x = c(75, 50), n = c(100, 100), alternative = "two.sided")
 
 
 
