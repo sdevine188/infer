@@ -11,9 +11,15 @@ library(boot)
 # https://ismayc.github.io/talks/data-day-texas-infer/slide_deck.html#53
 # https://stats.stackexchange.com/questions/20217/bootstrap-vs-permutation-hypotheis-testing
 # https://www.rdocumentation.org/packages/infer/versions/0.3.1/topics/conf_int
+# http://www2.stat.duke.edu/~banks/111-lectures.dir/lect13.pdf
 
+# https://sphweb.bumc.bu.edu/otlt/mph-modules/bs/bs704_confidence_intervals/bs704_confidence_intervals_print.html#:~:text=If%20a%2095%25%20confidence%20interval,significant%20difference%20between%20the%20groups.
+# If a 95% confidence interval includes the null value, then there is no statistically meaningful or 
+# statistically significant difference between the groups. If the confidence interval does not include the 
+# null value, then we conclude that there is a statistically significant difference between the groups.
 
-# note that stackexchange said permutation is more commonly used for tests, whereas bootstrap is more commonly used to get conf_int
+# note that stackexchange said permutation is more commonly used for tests, 
+# whereas bootstrap is more commonly used to get conf_int
 # https://stats.stackexchange.com/questions/20217/bootstrap-vs-permutation-hypotheis-testing
 
 
@@ -96,14 +102,16 @@ output
 output %>% summarize(std_error = (conf.high - estimate) / 1.96)
 
 
-#################
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 # get conf_int for diff_in_means with bootstrap method
 # note, I'm removing NA values to try and get infer's bootstrap conf_ints to match the boot package
 # initially there was a difference, which I thought might because infer and boot handle NA's differently?
 # results: dropping NA's didn't have an effect- infer still gets slightly different results than boot
-# infer CI: -3.9ish to 10.2ish; boot CI: -2.2ish to 8.4ish (even boot's percentile and normal CI methods) 
+# infer CI: -3.68ish to 10.3ish; boot CI: -2.2ish to 8.4ish (even boot's percentile and normal CI methods) 
 # for some reason infer seems more conservative, giving wider CI
 observed_diff_in_means <- fli_small %>% select(arr_delay, half_year) %>% 
         filter(!is.na(arr_delay), !is.na(half_year)) %>%
@@ -112,35 +120,120 @@ observed_diff_in_means <- fli_small %>% select(arr_delay, half_year) %>%
 observed_diff_in_means
 
 # get bootstrap_distn for diff in means
-# bootstrap just takes resamples of data with replacement (same number of observations), then calculates the diff_in_means on these replicates
+# bootstrap just takes resamples of data with replacement (same number of observations), 
+# then calculates the diff_in_means on these replicates
 # the collection of these diff_in_means across replicates creates diff_in_means sampling distro
+set.seed(123)
 diff_in_means_bootstrap_dist <- fli_small %>% 
         select(arr_delay, half_year) %>% 
         filter(!is.na(arr_delay), !is.na(half_year)) %>%
-        specify(arr_delay ~ half_year) %>% generate(reps = 2000, type = "bootstrap") %>%
+        specify(arr_delay ~ half_year) %>%
+        hypothesize(null = "independence") %>%
+        generate(reps = 1000, type = "bootstrap") %>%
         calculate(stat = "diff in means", order = c("h1", "h2"))
 diff_in_means_bootstrap_dist
 
 # visualize diff_in_means_bootstrap_dist
-diff_in_means_bootstrap_dist %>% visualize()
+diff_in_means_bootstrap_dist %>% visualize() 
 
 # get conf_int for diff_in_means
 # conf_int using randomized bootstrap diff_in_means percentile method
-diff_in_means_bootstrap_dist %>% conf_int(level = 0.95, type = "percentile")
+# note that for get_confidence_interval type = se, you need to provide point_estimate = observed_diff_in_means 
+# so that it can caluclate observed_diff_in_means +/- (1.96 * se)
+# when get_confidence_interval type = "percentile", you don't need to pass observed_diff_in_means
+# because it just grabs the .025 and .975 percentiles 
+diff_in_means_bootstrap_dist %>% get_confidence_interval(level = 0.95, type = "percentile")
 diff_in_means_bootstrap_dist %>% 
-        summarize(quantiles = list(enframe(quantile(x = stat, probs = c(.025, .975))))) %>% unnest()
+        summarize(quantiles = list(enframe(quantile(x = stat, probs = c(.025, .975))))) %>% unnest(quantiles)
 
 # conf_int using theoretical 1.96 * std_error method
 # std_error is measure of precision of estimate, 
 # calculated as the standard deviation of the estimate's sampling distribution
+# note that for get_confidence_interval type = se, you need to provide point_estimate = observed_diff_in_means 
+# so that it can caluclate observed_diff_in_means +/- (1.96 * se)
+# when get_confidence_interval type = "percentile", you don't need to pass observed_diff_in_means
+# because it just grabs the .025 and .975 percentiles 
 diff_in_means_bootstrap_dist %>% 
         summarize(se = sd(stat), 
                   conf_int_lower = observed_diff_in_means$stat - 1.96 * se, 
                   conf_int_upper = observed_diff_in_means$stat + 1.96 * se)
-diff_in_means_bootstrap_dist %>% conf_int(type = "se", point_estimate = observed_diff_in_means)
+diff_in_means_bootstrap_dist %>% get_confidence_interval(level = .95, type = "se", point_estimate = observed_diff_in_means)
 
 
-##################
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+# use permutation test
+# note, I'm removing NA values to try and get infer's bootstrap conf_ints to match the boot package
+# initially there was a difference, which I thought might because infer and boot handle NA's differently?
+# results: dropping NA's didn't have an effect- infer still gets slightly different results than boot
+# infer CI: -3.68ish to 10.3ish; boot CI: -2.2ish to 8.4ish (even boot's percentile and normal CI methods) 
+# for some reason infer seems more conservative, giving wider CI
+observed_diff_in_means <- fli_small %>% select(arr_delay, half_year) %>% 
+        filter(!is.na(arr_delay), !is.na(half_year)) %>%
+        specify(arr_delay ~ half_year) %>% 
+        calculate(stat = "diff in means", order = c("h1", "h2"))
+observed_diff_in_means
+
+# get permute_dist for diff in means
+# "We can generate the null distribution using permutation, where, for each replicate, 
+# each value of degree status will be randomly reassigned (without replacement) to a new number of hours worked 
+# per week in the sample in order to break any association between the two."
+set.seed(123)
+diff_in_means_permute_dist <- fli_small %>% 
+        select(arr_delay, half_year) %>% 
+        filter(!is.na(arr_delay), !is.na(half_year)) %>%
+        specify(arr_delay ~ half_year) %>%
+        hypothesize(null = "independence") %>%
+        generate(reps = 1000, type = "permute") %>%
+        calculate(stat = "diff in means", order = c("h1", "h2"))
+diff_in_means_permute_dist
+
+# visualize diff_in_means_permute_dist and diff_in_means_bootstrap_dist
+diff_in_means_permute_dist %>% visualize() + shade_p_value(observed_diff_in_means, direction = "two-sided")
+
+# get p_value for permute_dist
+diff_in_means_permute_dist %>% 
+        get_p_value(obs_stat = observed_diff_in_means, direction = "two-sided")
+
+# note that pnorm gives a very large p_value for observed_diff_in_means, this is because
+# the permute_null_dist is normal, but is not standardized and has values far above traditional normal dist 
+# where you subtract the mean and divide by standard deviation
+# pnorm(q = observed_diff_in_means %>% pull(stat))
+
+# get conf_int for diff_in_means
+# note that for permutation test, get_confidence_interval type = percentile seems to give a weird answer
+# of large values around zero (-7, 7), but get_confidence_interval type = se gives reasonable conf_int that is
+# also very close to the bootstrapped conf_int found above
+# conf_int using randomized bootstrap diff_in_means percentile method
+# note that for get_confidence_interval type = se, you need to provide point_estimate = observed_diff_in_means 
+# so that it can caluclate observed_diff_in_means +/- (1.96 * se)
+# when get_confidence_interval type = "percentile", you don't need to pass observed_diff_in_means
+# because it just grabs the .025 and .975 percentiles 
+
+# diff_in_means_permute_dist %>% get_confidence_interval(level = 0.95, type = "percentile")
+# diff_in_means_permute_dist %>% 
+#         summarize(quantiles = list(enframe(quantile(x = stat, probs = c(.025, .975))))) %>% unnest(quantiles)
+
+# conf_int using theoretical 1.96 * std_error method
+# std_error is measure of precision of estimate, 
+# calculated as the standard deviation of the estimate's sampling distribution
+# note that for get_confidence_interval type = se, you need to provide point_estimate = observed_diff_in_means 
+# so that it can caluclate observed_diff_in_means +/- (1.96 * se)
+# when get_confidence_interval type = "percentile", you don't need to pass observed_diff_in_means
+# because it just grabs the .025 and .975 percentiles 
+diff_in_means_permute_dist %>% 
+        summarize(se = sd(stat), 
+                  conf_int_lower = observed_diff_in_means$stat - 1.96 * se, 
+                  conf_int_upper = observed_diff_in_means$stat + 1.96 * se)
+diff_in_means_permute_dist %>% get_confidence_interval(level = .95, type = "se", point_estimate = observed_diff_in_means)
+
+
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 # get bootstrap confidence interval using boot package, 
@@ -175,7 +268,9 @@ bca_conf_int <- boot.ci(diff_in_mean_arr_delay_boot_obj, conf = 0.95)
 bca_conf_int
 
 
-##################
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 # conduct same theoretical t_test with infer
@@ -204,7 +299,7 @@ fli_small %>%
         visualize(method = "theoretical", obs_stat = observed_t_score, direction = "two_sided")
 
 
-###############
+#///////////////////////////////
 
 
 # just to show function, calculate t stat using specify() and calculate()
@@ -213,7 +308,9 @@ fli_small %>%
 fli_small %>% specify(arr_delay ~ half_year) %>% calculate(stat = "t", order = c("h1", "h2"))
 
 
-##################
+#//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#//////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 # use permute to calculate distribution of t_stats under the null hypothesis that there's no diff in means
@@ -228,8 +325,11 @@ fli_small %>% specify(arr_delay ~ half_year) %>% calculate(stat = "t", order = c
 # explanation of permutation tests: http://faculty.washington.edu/kenrice/sisg/SISG-08-06.pdf
 # also: http://genomicsclass.github.io/book/pages/permutation_tests.html
 set.seed(123)
-t_distro_under_null_hypoth <- fli_small %>% specify(arr_delay ~ half_year) %>% hypothesize(null = "independence") %>%
-        generate(reps = 1000, type = "permute") %>% calculate(stat = "t", order = c("h1", "h2"))
+t_distro_under_null_hypoth <- fli_small %>% 
+        specify(arr_delay ~ half_year) %>% 
+        hypothesize(null = "independence") %>%
+        generate(reps = 1000, type = "permute") %>% 
+        calculate(stat = "t", order = c("h1", "h2"))
 t_distro_under_null_hypoth
 
 # visualize t_distro_under_null_hypoth
@@ -247,17 +347,21 @@ t_distro_under_null_hypoth %>% get_pvalue(obs_stat = observed_t_score, direction
 
 # use permute to conduct same hypothesis test using calculate(stat = "diff in means") instead of stat = "t"
 set.seed(123)
-diff_in_means_distro_under_null_hypoth <- fli_small %>% specify(arr_delay ~ half_year) %>% hypothesize(null = "independence") %>%
-        generate(reps = 1000, type = "permute") %>% calculate(stat = "diff in means", order = c("h1", "h2"))
+diff_in_means_distro_under_null_hypoth <- fli_small %>% specify(arr_delay ~ half_year) %>% 
+        hypothesize(null = "independence") %>%
+        generate(reps = 1000, type = "permute") %>% 
+        calculate(stat = "diff in means", order = c("h1", "h2"))
 diff_in_means_distro_under_null_hypoth
 
 # visualize diff_in_means_distro_under_null_hypoth
 diff_in_means_distro_under_null_hypoth %>% visualize()
 
 # visualize diff_in_means_distro_under_null_hypoth along with the observed_t_score to see how extreme it is
-diff_in_means_distro_under_null_hypoth %>% visualize(obs_stat = observed_diff_in_means, direction = "two_sided")
+diff_in_means_distro_under_null_hypoth %>% visualize() + 
+        shade_p_value(obs_stat = observed_diff_in_means,
+                      direction = "two-sided")
 
-# get p_value for how unlikely observed_t_score is given t_distro_under_null_hypoth
+# get p_value showing how unlikely observed_diff_in_means is given diff_in_means_distro_under_null_hypoth
 diff_in_means_distro_under_null_hypoth %>% get_pvalue(obs_stat = observed_diff_in_means, direction = "two_sided")
 
 
