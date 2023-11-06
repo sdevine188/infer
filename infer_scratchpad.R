@@ -17,6 +17,10 @@ library(boot)
 # https://online.stat.psu.edu/stat500/lesson/5/5.4/5.4.1 
 # https://online.stat.psu.edu/stat500/lesson/5/5.3/5.3.1
 
+# theory-based standard errors for diff_in_prop and diff_in_mean
+# https://online.stat.psu.edu/stat200/book/export/html/193
+# http://vassarstats.net/dist2.html
+
 # https://sphweb.bumc.bu.edu/otlt/mph-modules/bs/bs704_confidence_intervals/bs704_confidence_intervals_print.html#:~:text=If%20a%2095%25%20confidence%20interval,significant%20difference%20between%20the%20groups.
 # If a 95% confidence interval includes the null value, then there is no statistically meaningful or 
 # statistically significant difference between the groups. If the confidence interval does not include the 
@@ -76,6 +80,7 @@ length(h2_arr_delay)
 # https://statistics.laerd.com/statistical-guides/independent-t-test-statistical-guide.php
 
 # standard error is std_err = sqrt[ (std_dev1^2/n1) + (std_dev2^2/n2) ]
+# http://vassarstats.net/dist2.html
 # https://stattrek.com/hypothesis-test/difference-in-means.aspx
 h1_arr_delay_sd <- sd(h1_arr_delay, na.rm = TRUE)
 h1_arr_delay_n <- length(h1_arr_delay[!is.na(h1_arr_delay)])
@@ -96,6 +101,12 @@ mean_diff
 mean_diff - 1.96 * std_error
 mean_diff + 1.96 * std_error
 
+tibble(arr_delay = h1_arr_delay) %>% mutate(origin = "h1") %>%
+        bind_rows(.,
+                  tibble(arr_delay = h2_arr_delay) %>% mutate(origin = "h2")) %>%
+        group_by(origin) %>%
+        summarize(mean_arr_delay = mean(arr_delay, na.rm = TRUE))
+
 
 ####################
 
@@ -113,7 +124,8 @@ output %>% summarize(std_error = (conf.high - estimate) / 1.96)
 # note t_test() gives more info like t_stat, t_df, p_value, alternative, and ci - though not the diff_in_means or std_error
 # to get actual t_stat instead, use calculate(stat = "t") as shown below 
 t_test_results <- fli_small %>% 
-        t_test(formula = arr_delay ~ half_year, alternative = "two_sided", order = c("h1", "h2"))
+        # t_test(formula = arr_delay ~ half_year, alternative = "two_sided", order = c("h1", "h2"))
+        t_test(response = arr_delay, explanatory = half_year, alternative = "two_sided", order = c("h1", "h2"))
 t_test_results
 
 # add std_error
@@ -138,7 +150,96 @@ sampling_dist
 get_confidence_interval(x = sampling_dist, level = .95, point_estimate = observed_diff_in_means)
 
 
-#//////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////
+
+
+# can also use prop_test instead of prop.test
+
+
+# with prop_test
+
+fli_small %>% 
+        mutate(arr_delay_over_20_flag = case_when(arr_delay < -20 ~ 1,
+                                                  TRUE ~ 0)) %>%
+        group_by(half_year) %>%
+        summarize(arr_delay_over_20_flag = mean(arr_delay_over_20_flag)) %>%
+        pivot_wider(names_from = half_year, values_from = arr_delay_over_20_flag) %>%
+        mutate(diff_in_prop = h1 - h2)
+
+fli_small %>% 
+        mutate(arr_delay_over_20_flag = case_when(arr_delay < -20 ~ "1",
+                                                  TRUE ~ "0")) %>%
+        prop_test(response = arr_delay_over_20_flag, explanatory = half_year, success = "1",
+                  alternative = "two_sided", order = c("h1", "h2"), correct = TRUE, conf_level = .95)
+
+
+#/////////////////////////
+
+
+# with prop.test()
+
+h1_x <- fli_small %>% 
+        mutate(arr_delay_over_20_flag = case_when(arr_delay < -20 ~ "1",
+                                                  TRUE ~ "0")) %>%
+        filter(arr_delay_over_20_flag == "1", half_year == "h1") %>% 
+        nrow()
+h1_x
+
+h2_x <- fli_small %>% 
+        mutate(arr_delay_over_20_flag = case_when(arr_delay < -20 ~ "1",
+                                                  TRUE ~ "0")) %>%
+        filter(arr_delay_over_20_flag == "1", half_year == "h2") %>% 
+        nrow()
+h2_x
+
+
+h1_n <- fli_small %>% 
+        mutate(arr_delay_over_20_flag = case_when(arr_delay < -20 ~ "1",
+                                                  TRUE ~ "0")) %>%
+        filter(half_year == "h1") %>% 
+        nrow()
+h1_n
+
+h2_n <- fli_small %>% 
+        mutate(arr_delay_over_20_flag = case_when(arr_delay < -20 ~ "1",
+                                                  TRUE ~ "0")) %>%
+        filter(half_year == "h2") %>% 
+        nrow()
+h2_n
+
+prop.test(x = c(h1_x, h2_x), n = c(h1_n, h2_n), alternative = "two.sided", 
+          conf.level = .95, correct = TRUE)
+
+
+#////////////////////////////
+
+
+# manually
+
+# https://online.stat.psu.edu/stat200/book/export/html/193
+
+fli_small %>% 
+        mutate(arr_delay_over_20_flag = case_when(arr_delay < -20 ~ 1,
+                                                  TRUE ~ 0)) %>%
+        group_by(half_year) %>%
+        summarize(arr_delay_over_20_flag = mean(arr_delay_over_20_flag),
+                  n = n()) %>%
+        pivot_longer(cols = c(arr_delay_over_20_flag, n), names_to = "var", values_to = "values") %>%
+        unite(col = "var", half_year, var) %>%
+        pivot_wider(names_from = var, values_from = values) %>%
+        mutate(diff_in_prop = h1_arr_delay_over_20_flag - h2_arr_delay_over_20_flag,
+               standard_error = sqrt( ((h1_arr_delay_over_20_flag * (1 - h1_arr_delay_over_20_flag)) / h1_n) +
+                                                ((h2_arr_delay_over_20_flag * (1 - h2_arr_delay_over_20_flag)) / h2_n) ),
+               conf_int_lower = diff_in_prop - (2 * standard_error),
+               conf_int_upper = diff_in_prop + (2 * standard_error))
+
+
+
+#////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////
 
 
 # can also get confidence intervals for means 
@@ -174,15 +275,33 @@ gss %>% summarise(mean_hours = mean(hours),
 # can also get confidence intervals for proportions
 
 
-sample_prop <- gss %>%
+# note that calculate(stat = "prop") requires a categorical variable, not a numeric dummy
+gss %>%
         mutate(degree_flag = case_when(college == "degree" ~ 1,
                                        TRUE ~ 0)) %>%
-        specify(response = college, success = "degree") %>%
+        specify(response = degree_flag) %>%
+        calculate(stat = "prop")
+
+gss %>%
+        mutate(degree_flag = case_when(college == "degree" ~ "1",
+                                       TRUE ~ "0")) %>%
+        specify(response = degree_flag, success = "1") %>%
+        calculate(stat = "prop")
+
+
+
+
+sample_prop <- gss %>%
+        mutate(degree_flag = case_when(college == "degree" ~ "1",
+                                       TRUE ~ "0")) %>%
+        specify(response = degree_flag, success = "1") %>%
         calculate(stat = "prop")
 sample_prop
 
 sampling_dist <- gss %>%
-        specify(response = college, success = "degree") %>%
+        mutate(degree_flag = case_when(college == "degree" ~ "1",
+                                       TRUE ~ "0")) %>%
+        specify(response = degree_flag, success = "1") %>%
         assume("z")
 sampling_dist
 
