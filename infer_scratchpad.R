@@ -13,6 +13,10 @@ library(boot)
 # https://www.rdocumentation.org/packages/infer/versions/0.3.1/topics/conf_int
 # http://www2.stat.duke.edu/~banks/111-lectures.dir/lect13.pdf
 
+# theory-based confidence intervals for mean and prop using standard error method
+# https://online.stat.psu.edu/stat500/lesson/5/5.4/5.4.1 
+# https://online.stat.psu.edu/stat500/lesson/5/5.3/5.3.1
+
 # https://sphweb.bumc.bu.edu/otlt/mph-modules/bs/bs704_confidence_intervals/bs704_confidence_intervals_print.html#:~:text=If%20a%2095%25%20confidence%20interval,significant%20difference%20between%20the%20groups.
 # If a 95% confidence interval includes the null value, then there is no statistically meaningful or 
 # statistically significant difference between the groups. If the confidence interval does not include the 
@@ -102,6 +106,100 @@ output
 output %>% summarize(std_error = (conf.high - estimate) / 1.96)
 
 
+#/////////////////////
+
+
+# conduct same theoretical t_test with infer
+# note t_test() gives more info like t_stat, t_df, p_value, alternative, and ci - though not the diff_in_means or std_error
+# to get actual t_stat instead, use calculate(stat = "t") as shown below 
+t_test_results <- fli_small %>% 
+        t_test(formula = arr_delay ~ half_year, alternative = "two_sided", order = c("h1", "h2"))
+t_test_results
+
+# add std_error
+t_test_results %>% mutate(diff_in_means = observed_diff_in_means$stat, std_error = (upper_ci - diff_in_means) / 1.96)
+
+
+#////////////////////////
+
+
+# can also get theory-based confidence intervals with get_confidence_interval
+?get_confidence_interval
+# distribution = "t": point_estimate should be the output of calculate() with stat = "mean" or stat = "diff in means"
+# distribution = "z": point_estimate should be the output of calculate() with stat = "prop" or stat = "diff in props"
+
+sampling_dist <- fli_small %>% 
+        select(arr_delay, half_year) %>% 
+        filter(!is.na(arr_delay), !is.na(half_year)) %>%
+        specify(arr_delay ~ half_year) %>%
+        assume("t")
+sampling_dist
+
+get_confidence_interval(x = sampling_dist, level = .95, point_estimate = observed_diff_in_means)
+
+
+#//////////////////////////
+
+
+# can also get confidence intervals for means 
+
+
+sample_mean <- gss %>%
+        specify(response = hours) %>%
+        calculate(stat = "mean")
+sample_mean
+
+sampling_dist <- gss %>%
+        specify(response = hours) %>%
+        assume("t")
+sampling_dist
+
+get_confidence_interval(x = sampling_dist, 
+        level = .95, 
+        point_estimate = sample_mean)
+
+# calculate manually
+# https://online.stat.psu.edu/stat500/lesson/5/5.4/5.4.1
+# https://online.stat.psu.edu/stat500/lesson/5/5.3/5.3.1
+
+gss %>% summarise(mean_hours = mean(hours),
+                                standard_error = sd(hours) / sqrt(n())) %>%
+        mutate(conf_int_lower = mean_hours - (1.96 * standard_error),
+               conf_int_upper = mean_hours + (1.96 * standard_error))
+
+
+#//////////////////////////
+
+
+# can also get confidence intervals for proportions
+
+
+sample_prop <- gss %>%
+        mutate(degree_flag = case_when(college == "degree" ~ 1,
+                                       TRUE ~ 0)) %>%
+        specify(response = college, success = "degree") %>%
+        calculate(stat = "prop")
+sample_prop
+
+sampling_dist <- gss %>%
+        specify(response = college, success = "degree") %>%
+        assume("z")
+sampling_dist
+
+get_confidence_interval(x = sampling_dist, 
+        level = .95, 
+        point_estimate = sample_prop)
+
+# calculate manually
+# https://online.stat.psu.edu/stat500/lesson/5/5.4/5.4.1
+# https://online.stat.psu.edu/stat500/lesson/5/5.3/5.3.1
+
+gss %>% summarise(prop_degree = sum(college == "degree") / n(),
+                  standard_error = sqrt( (prop_degree * (1 - prop_degree)) / n() )) %>%
+        mutate(conf_int_lower = prop_degree - (1.96 * standard_error),
+               conf_int_upper = prop_degree + (1.96 * standard_error))
+
+
 #////////////////////////////////////////////////////////////////////////////////////////////////////
 #////////////////////////////////////////////////////////////////////////////////////////////////////
 #////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -129,7 +227,7 @@ diff_in_means_bootstrap_dist <- fli_small %>%
         filter(!is.na(arr_delay), !is.na(half_year)) %>%
         specify(arr_delay ~ half_year) %>%
         hypothesize(null = "independence") %>%
-        generate(reps = 1000, type = "bootstrap") %>%
+        generate(reps = 10000, type = "bootstrap") %>%
         calculate(stat = "diff in means", order = c("h1", "h2"))
 diff_in_means_bootstrap_dist
 
@@ -187,7 +285,7 @@ diff_in_means_permute_dist <- fli_small %>%
         filter(!is.na(arr_delay), !is.na(half_year)) %>%
         specify(arr_delay ~ half_year) %>%
         hypothesize(null = "independence") %>%
-        generate(reps = 1000, type = "permute") %>%
+        generate(reps = 2000, type = "permute") %>%
         calculate(stat = "diff in means", order = c("h1", "h2"))
 diff_in_means_permute_dist
 
