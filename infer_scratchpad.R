@@ -1,8 +1,9 @@
 library(nycflights13)
-library(dplyr)
+library(tidyverse)
 library(stringr)
 library(infer)
 library(boot)
+library(broom)
 
 # https://github.com/topepo/infer
 # https://github.com/topepo/infer/tree/master/vignettes
@@ -34,7 +35,10 @@ library(boot)
 # note that hypothesis tests below use "diff in means", but can also swap out for conduct "diff in prop" if dependent variable is a dummy
 
 
-######################################################################################################################
+#/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+# get data ####
 
 set.seed(2017)
 fli_small <- flights %>% 
@@ -63,10 +67,12 @@ fli_small %>% ggplot(data = ., aes(x = arr_delay)) + geom_histogram() + facet_gr
 fli_small %>% ggplot(data = ., aes(x = arr_delay)) + geom_density() + facet_grid(rows = vars(half_year))
 
 
-####################
+#///////////////////////////
 
 
-# using theory, get conf_int for diff_in_means
+#  t_test for diff_in_means ####
+
+# using theory, get conf_int for diff_in_means ####
 h1_arr_delay <- fli_small %>% filter(half_year == "h1") %>% pull(arr_delay)
 summary(h1_arr_delay)
 length(h1_arr_delay)
@@ -108,10 +114,10 @@ tibble(arr_delay = h1_arr_delay) %>% mutate(origin = "h1") %>%
         summarize(mean_arr_delay = mean(arr_delay, na.rm = TRUE))
 
 
-####################
+#/////////////////////
 
 
-# run theoretical t.test
+# run theoretical t.test 
 output <- t.test(x = h1_arr_delay, y = h2_arr_delay) %>% tidy()
 output
 output %>% summarize(std_error = (conf.high - estimate) / 1.96)
@@ -120,7 +126,7 @@ output %>% summarize(std_error = (conf.high - estimate) / 1.96)
 #/////////////////////
 
 
-# conduct same theoretical t_test with infer
+# conduct same theoretical t_test with infer ####
 # note t_test() gives more info like t_stat, t_df, p_value, alternative, and ci - though not the diff_in_means or std_error
 # to get actual t_stat instead, use calculate(stat = "t") as shown below 
 t_test_results <- fli_small %>% 
@@ -135,7 +141,7 @@ t_test_results %>% mutate(diff_in_means = observed_diff_in_means$stat, std_error
 #////////////////////////
 
 
-# can also get theory-based confidence intervals with get_confidence_interval
+# theory-based confidence intervals for diff_in_means ####
 ?get_confidence_interval
 # distribution = "t": point_estimate should be the output of calculate() with stat = "mean" or stat = "diff in means"
 # distribution = "z": point_estimate should be the output of calculate() with stat = "prop" or stat = "diff in props"
@@ -155,10 +161,10 @@ get_confidence_interval(x = sampling_dist, level = .95, point_estimate = observe
 #////////////////////////////////////////////////////////////////////////////////////////////
 
 
-# can also use prop_test instead of prop.test
+# prop_test for diff_in_means ####
 
 
-# with prop_test
+# with prop_test 
 
 fli_small %>% 
         mutate(arr_delay_over_20_flag = case_when(arr_delay < -20 ~ 1,
@@ -178,7 +184,7 @@ fli_small %>%
 #/////////////////////////
 
 
-# with prop.test()
+# with prop.test() 
 
 h1_x <- fli_small %>% 
         mutate(arr_delay_over_20_flag = case_when(arr_delay < -20 ~ "1",
@@ -210,13 +216,14 @@ h2_n <- fli_small %>%
 h2_n
 
 prop.test(x = c(h1_x, h2_x), n = c(h1_n, h2_n), alternative = "two.sided", 
-          conf.level = .95, correct = TRUE)
+          conf.level = .95, correct = TRUE) %>% 
+        tidy()
 
 
 #////////////////////////////
 
 
-# manually
+# manually 
 
 # https://online.stat.psu.edu/stat200/book/export/html/193
 
@@ -231,7 +238,7 @@ fli_small %>%
         pivot_wider(names_from = var, values_from = values) %>%
         mutate(diff_in_prop = h1_arr_delay_over_20_flag - h2_arr_delay_over_20_flag,
                standard_error = sqrt( ((h1_arr_delay_over_20_flag * (1 - h1_arr_delay_over_20_flag)) / h1_n) +
-                                                ((h2_arr_delay_over_20_flag * (1 - h2_arr_delay_over_20_flag)) / h2_n) ),
+                                              ((h2_arr_delay_over_20_flag * (1 - h2_arr_delay_over_20_flag)) / h2_n) ),
                conf_int_lower = diff_in_prop - (2 * standard_error),
                conf_int_upper = diff_in_prop + (2 * standard_error))
 
@@ -242,7 +249,7 @@ fli_small %>%
 #////////////////////////////////////////////////////////////////////////////////////////////
 
 
-# can also get confidence intervals for means 
+# theory-based confidence intervals for means ####
 
 
 sample_mean <- gss %>%
@@ -256,15 +263,15 @@ sampling_dist <- gss %>%
 sampling_dist
 
 get_confidence_interval(x = sampling_dist, 
-        level = .95, 
-        point_estimate = sample_mean)
+                        level = .95, 
+                        point_estimate = sample_mean)
 
-# calculate manually
+# calculate manually 
 # https://online.stat.psu.edu/stat500/lesson/5/5.4/5.4.1
 # https://online.stat.psu.edu/stat500/lesson/5/5.3/5.3.1
 
 gss %>% summarise(mean_hours = mean(hours),
-                                standard_error = sd(hours) / sqrt(n())) %>%
+                  standard_error = sd(hours) / sqrt(n())) %>%
         mutate(conf_int_lower = mean_hours - (1.96 * standard_error),
                conf_int_upper = mean_hours + (1.96 * standard_error))
 
@@ -272,7 +279,7 @@ gss %>% summarise(mean_hours = mean(hours),
 #//////////////////////////
 
 
-# can also get confidence intervals for proportions
+# theory-based confidence intervals for proportions ####
 
 
 # note that calculate(stat = "prop") requires a categorical variable, not a numeric dummy
@@ -306,8 +313,8 @@ sampling_dist <- gss %>%
 sampling_dist
 
 get_confidence_interval(x = sampling_dist, 
-        level = .95, 
-        point_estimate = sample_prop)
+                        level = .95, 
+                        point_estimate = sample_prop)
 
 # calculate manually
 # https://online.stat.psu.edu/stat500/lesson/5/5.4/5.4.1
@@ -324,7 +331,8 @@ gss %>% summarise(prop_degree = sum(college == "degree") / n(),
 #////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-# get conf_int for diff_in_means with bootstrap method
+# get conf_int for diff_in_means with infer's bootstrap method ####
+
 # note, I'm removing NA values to try and get infer's bootstrap conf_ints to match the boot package
 # initially there was a difference, which I thought might because infer and boot handle NA's differently?
 # results: dropping NA's didn't have an effect- infer still gets slightly different results than boot
@@ -363,26 +371,30 @@ diff_in_means_bootstrap_dist %>% get_confidence_interval(level = 0.95, type = "p
 diff_in_means_bootstrap_dist %>% 
         summarize(quantiles = list(enframe(quantile(x = stat, probs = c(.025, .975))))) %>% unnest(quantiles)
 
-# conf_int using theoretical 1.96 * std_error method
-# std_error is measure of precision of estimate, 
-# calculated as the standard deviation of the estimate's sampling distribution
+# conf_int using theoretical 1.96 * std_dev method 
+# note that infer oddly calls this the "se" method, but it actually uses the std_dev not the standard error (which is sd / sqrt(n))
+# std_dev is measure of precision of estimate, 
 # note that for get_confidence_interval type = se, you need to provide point_estimate = observed_diff_in_means 
-# so that it can caluclate observed_diff_in_means +/- (1.96 * se)
+# so that it can caluclate observed_diff_in_means +/- (1.96 * sd)
 # when get_confidence_interval type = "percentile", you don't need to pass observed_diff_in_means
 # because it just grabs the .025 and .975 percentiles 
 diff_in_means_bootstrap_dist %>% 
-        summarize(se = sd(stat), 
-                  conf_int_lower = observed_diff_in_means$stat - 1.96 * se, 
-                  conf_int_upper = observed_diff_in_means$stat + 1.96 * se)
+        summarize(sd = sd(stat), 
+                  conf_int_lower = observed_diff_in_means$stat - 1.96 * sd, 
+                  conf_int_upper = observed_diff_in_means$stat + 1.96 * sd)
 diff_in_means_bootstrap_dist %>% get_confidence_interval(level = .95, type = "se", point_estimate = observed_diff_in_means)
 
+# conf_int using bias-corrected method
+diff_in_means_bootstrap_dist %>% get_confidence_interval(level = .95, type = "bias-corrected", point_estimate = observed_diff_in_means)
+
 
 #////////////////////////////////////////////////////////////////////////////////////////////////////
 #////////////////////////////////////////////////////////////////////////////////////////////////////
 #////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-# use permutation test
+# permutation test w infer ####
+
 # note, I'm removing NA values to try and get infer's bootstrap conf_ints to match the boot package
 # initially there was a difference, which I thought might because infer and boot handle NA's differently?
 # results: dropping NA's didn't have an effect- infer still gets slightly different results than boot
@@ -434,17 +446,17 @@ diff_in_means_permute_dist %>%
 # diff_in_means_permute_dist %>% 
 #         summarize(quantiles = list(enframe(quantile(x = stat, probs = c(.025, .975))))) %>% unnest(quantiles)
 
-# conf_int using theoretical 1.96 * std_error method
-# std_error is measure of precision of estimate, 
-# calculated as the standard deviation of the estimate's sampling distribution
+# conf_int using theoretical 1.96 * std_dev method 
+# note that infer oddly calls this the "se" method, but it actually uses the std_dev not the standard error (which is sd / sqrt(n))
+# std_dev is measure of precision of estimate, 
 # note that for get_confidence_interval type = se, you need to provide point_estimate = observed_diff_in_means 
-# so that it can caluclate observed_diff_in_means +/- (1.96 * se)
+# so that it can caluclate observed_diff_in_means +/- (1.96 * sd)
 # when get_confidence_interval type = "percentile", you don't need to pass observed_diff_in_means
 # because it just grabs the .025 and .975 percentiles 
 diff_in_means_permute_dist %>% 
-        summarize(se = sd(stat), 
-                  conf_int_lower = observed_diff_in_means$stat - 1.96 * se, 
-                  conf_int_upper = observed_diff_in_means$stat + 1.96 * se)
+        summarize(sd = sd(stat), 
+                  conf_int_lower = observed_diff_in_means$stat - 1.96 * sd, 
+                  conf_int_upper = observed_diff_in_means$stat + 1.96 * sd)
 diff_in_means_permute_dist %>% get_confidence_interval(level = .95, type = "se", point_estimate = observed_diff_in_means)
 
 
@@ -452,6 +464,8 @@ diff_in_means_permute_dist %>% get_confidence_interval(level = .95, type = "se",
 #////////////////////////////////////////////////////////////////////////////////////////////////////
 #////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+# bootstrap with boot package ####
 
 # get bootstrap confidence interval using boot package, 
 # which can provide the fancier and supposedly better Bias Corrected and Accelerated (BCA) bootstrap confidence interval
@@ -483,6 +497,161 @@ attributes(diff_in_mean_arr_delay_boot_obj)
 
 bca_conf_int <- boot.ci(diff_in_mean_arr_delay_boot_obj, conf = 0.95)
 bca_conf_int
+
+
+#//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+# from boot docs 
+# ?boot
+
+# https://stats.oarc.ucla.edu/r/faq/how-can-i-generate-bootstrap-statistics-in-r/
+# https://info.montgomerycollege.edu/_documents/faculty/maronne/math117/book-lock/ppt/lock3-4.pdf
+# https://acclab.github.io/bootstrap-confidence-intervals.html
+
+# get function to calculate stat
+get_diff_in_means <- function(data, indices) {
+        data %>% 
+                filter(row_number() %in% indices) %>%
+                filter(gender %in% c("masculine", "feminine")) %>%
+                group_by(gender) %>%
+                summarize(mean_height = mean(height, na.rm = TRUE)) %>%
+                ungroup() %>%
+                pivot_wider(names_from = gender, values_from = mean_height) %>%
+                mutate(diff_in_means = feminine - masculine) %>%
+                pull(diff_in_means)
+}
+
+# get bootstrap distribution of stat
+boot_diff_in_means <- boot(data = starwars, statistic = get_diff_in_means, R = 1000)
+boot_diff_in_means
+summary(boot_diff_in_means)
+attributes(boot_diff_in_means)
+class(boot_diff_in_means)
+
+# note the boot object gives stat on original data (t0) and the stat on each bootstrap sample (t)
+boot_diff_in_means$t0 %>% tibble(stat = .)
+boot_diff_in_means$t %>% tibble(stat = .)
+
+# plot
+plot(boot_diff_in_means)
+boot_diff_in_means$t %>% 
+        tibble(stat = .) %>% 
+        ggplot(data = ., mapping = aes(x = stat)) + geom_density()
+
+# get confidence interval for bootstrapped stat
+boot.ci(boot_diff_in_means, conf = 0.95, type = c("norm", "basic", "perc", "bca"))
+
+# percentile CI method uses the 2.5th and 97.5th percentiles as the CI
+# note that tidyverse recommends reframe() now instead of summarize() when returning more than one summary row
+# note that for some reason the boot package percentile CI is slightly off the result from manual calculation
+boot_diff_in_means$t %>% 
+        tibble(stat = .) %>%
+        # summarize(quantile = c("25%", "50%", "75%"),
+        #         mpg = quantile(stat, c(0.25, 0.5, 0.75)))
+        reframe(quantile = c("5%", "95%"),
+                  mpg = quantile(stat, c(0.025, 0.975)))
+
+# percentile method with slightly different syntax from a paper
+# https://osf.io/e97ay/download
+alpha <- 0.05
+quantile(boot_diff_in_means$t, probs = c(alpha/2, 1-alpha/2))
+
+# using the standard error (aka standard deviation of a sample) for the stat, and then using 2 x standard error for 95% CI
+# note this also doesn't match exactly the boot package CI output
+boot_diff_in_means$t %>%
+        tibble(stat = .) %>%
+        summarize(mean = mean(stat),
+                  standard_error = sd(stat) / sqrt(n()),
+                  conf_int_lower = mean - (2 * standard_error),
+                  conf_int_upper = mean + (2 * standard_error))
+
+# check original data
+starwars %>% 
+        filter(gender %in% c("masculine", "feminine")) %>%
+        group_by(gender) %>%
+        summarize(mean_height = mean(height, na.rm = TRUE)) %>%
+        ungroup() %>%
+        pivot_wider(names_from = gender, values_from = mean_height) %>%
+        mutate(diff_in_means = feminine - masculine) %>%
+        pull(diff_in_means)
+
+
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+# bootstrap with modelr ####
+
+# can do the same bootstrap CI in modelr or rsample (modelr seems newer/tidier)
+
+# https://modelr.tidyverse.org/reference/index.html
+# https://rsample.tidymodels.org/articles/rsample.html
+
+# https://stats.oarc.ucla.edu/r/faq/how-can-i-generate-bootstrap-statistics-in-r/
+# https://info.montgomerycollege.edu/_documents/faculty/maronne/math117/book-lock/ppt/lock3-4.pdf
+# https://acclab.github.io/bootstrap-confidence-intervals.html
+
+# resamples are row_numbers (for efficiency) that point under the hood to the data, 
+# so viewed as integers it shows just row_numbers, but viewed as tbl or df they show the data
+resamples <- resample(starwars, idx = 1:10)
+resamples
+resamples %>% as.integer()
+resamples %>% as_tibble()
+starwars %>% slice(1:10)
+
+# can also use resample_bootstrap to get indices for a single bootstrap resample
+resample_bootstrap(starwars)
+
+# more useful/direct to use bootstraps() and get multiple bootstarp resample indices
+
+# get bootstraps
+bootstrap_samples <- starwars %>% bootstrap(, n = 1000)
+bootstrap_samples
+bootstrap_samples %>% slice(1) %>% 
+        pull(strap) %>%
+        as.data.frame() %>% 
+        as_tibble()
+
+# create get_diff_in_means()
+get_diff_in_means <- function(data) {
+        data %>%
+                # pull(strap) %>%
+                as.data.frame() %>% 
+                as_tibble() %>%
+                filter(gender %in% c("masculine", "feminine")) %>%
+                group_by(gender) %>%
+                summarize(mean_height = mean(height, na.rm = TRUE)) %>%
+                ungroup() %>%
+                pivot_wider(names_from = gender, values_from = mean_height) %>%
+                mutate(diff_in_means = feminine - masculine) %>%
+                select(diff_in_means)
+}
+
+# get diff_in_means_boot_dist
+# note that we need to pull() to appropriately access the resample for map to work with
+diff_in_means_boot_dist <- map(.x = bootstrap_samples %>% select(strap) %>% pull(strap), 
+                               .f = ~ get_diff_in_means(data = .x)) %>%
+        bind_rows()
+
+# inspect
+diff_in_means_boot_dist
+diff_in_means_boot_dist %>%
+        reframe(percentile = c(".025", ".975"),
+                value = quantile(diff_in_means, probs = c(.025, .975)))
+
+# plot
+diff_in_means_boot_dist %>% 
+        ggplot(data = ., mapping = aes(x = diff_in_means)) + geom_density()
+
+# get CI with standard error method
+diff_in_means_boot_dist %>%
+        summarize(mean = mean(diff_in_means),
+                  standard_error = sd(diff_in_means) / sqrt(n()),
+                  conf_int_lower = mean - (2 * standard_error),
+                  conf_int_upper = mean + (2 * standard_error))
 
 
 #////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -530,7 +699,8 @@ fli_small %>% specify(arr_delay ~ half_year) %>% calculate(stat = "t", order = c
 #//////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-# use permute to calculate distribution of t_stats under the null hypothesis that there's no diff in means
+# permute test with infer ####
+# to calculate distribution of t_stats under the null hypothesis that there's no diff in means
 # infer uses random permutation to get t_stat distro, whereas theory uses theoretical t_stat distro based on assumptions
 
 # note that when using permute to randomly sample, we need to use hypothesize(), but when using bootstrap (see below) we don't need hypothesize()
@@ -559,7 +729,7 @@ t_distro_under_null_hypoth %>% visualize(obs_stat = observed_t_score, direction 
 t_distro_under_null_hypoth %>% get_pvalue(obs_stat = observed_t_score, direction = "two_sided")
 
 
-#################
+#/////////////////////
 
 
 # use permute to conduct same hypothesis test using calculate(stat = "diff in means") instead of stat = "t"
@@ -582,7 +752,7 @@ diff_in_means_distro_under_null_hypoth %>% visualize() +
 diff_in_means_distro_under_null_hypoth %>% get_pvalue(obs_stat = observed_diff_in_means, direction = "two_sided")
 
 
-#################
+#/////////////////////
 
 
 # just as an example, show why you do not want to get t_distro_under_null_hypoth using bootstrap method instead of permute
@@ -601,7 +771,7 @@ t_distro_under_null_hypoth %>% visualize()
 t_distro_under_null_hypoth_bootstrap %>% visualize()
 
 
-################
+#/////////////////////
 
 
 # can visualize both the randomization method distribution and the theoretical distribution
@@ -612,8 +782,7 @@ fli_small %>%
         calculate(stat = "t", order = c("h1", "h2")) %>% 
         visualize(method = "both", obs_stat = observed_t_score, direction = "two_sided")
 
-
-########################
+#/////////////////////
 
 
 # compare pvalues from randomization and theoretical distributions
@@ -622,9 +791,12 @@ t_distro_under_null_hypoth %>% get_pvalue(obs_stat = observed_t_score, direction
 diff_in_means_distro_under_null_hypoth %>% get_pvalue(obs_stat = observed_diff_in_means, direction = "two_sided")
 
 
-##############################################################################################
-##############################################################################################
-##############################################################################################
+#///////////////////////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+# historical ####
 
 
 # prop test with infer
@@ -708,6 +880,3 @@ prop_test(gss,
 # note that prop.test doesn't change depending on the designation of whether 1 or 0 equals a "success"
 prop.test(x = c(25, 50), n = c(100, 100), alternative = "two.sided")
 prop.test(x = c(75, 50), n = c(100, 100), alternative = "two.sided")
-
-
-
