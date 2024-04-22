@@ -2,10 +2,8 @@ library(nycflights13)
 library(tidyverse)
 library(stringr)
 library(infer)
-# library(boot)
+library(boot)
 library(broom)
-library(tidymodels)
-library(modelr)
 
 # https://github.com/topepo/infer
 # https://github.com/topepo/infer/tree/master/vignettes
@@ -511,6 +509,11 @@ bca_conf_int
 # https://info.montgomerycollege.edu/_documents/faculty/maronne/math117/book-lock/ppt/lock3-4.pdf
 # https://acclab.github.io/bootstrap-confidence-intervals.html
 
+# note that overlapping confidence intervals do not necessarily mean that there is not a significant difference
+# but non-overlapping confidence does mean there is a significant difference
+# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4877414/#:~:text=If%20two%20confidence%20intervals%20overlap,or%20studies%20is%20not%20significant.
+
+
 # get function to calculate stat
 get_diff_in_means <- function(data, indices) {
         data %>% 
@@ -533,7 +536,7 @@ class(boot_diff_in_means)
 
 # note the boot object gives stat on original data (t0) and the stat on each bootstrap sample (t)
 boot_diff_in_means$t0 %>% tibble(stat = .)
-boot_diff_in_means$t %>% tibble(stat = .)
+boot_diff_in_means$t %>% data.frame(stat = .) %>% as_tibble()
 
 # plot
 plot(boot_diff_in_means)
@@ -551,7 +554,7 @@ boot_diff_in_means$t %>%
         tibble(stat = .) %>%
         # summarize(quantile = c("25%", "50%", "75%"),
         #         mpg = quantile(stat, c(0.25, 0.5, 0.75)))
-        reframe(quantile = c("5%", "95%"),
+        reframe(quantile = c("2.5%", "97.5%"),
                   mpg = quantile(stat, c(0.025, 0.975)))
 
 # percentile method with slightly different syntax from a paper
@@ -559,12 +562,16 @@ boot_diff_in_means$t %>%
 alpha <- 0.05
 quantile(boot_diff_in_means$t, probs = c(alpha/2, 1-alpha/2))
 
-# using the standard error (aka standard deviation of a sample) for the stat, and then using 2 x standard error for 95% CI
+# using the standard error (aka standard deviation of a sample divided by sqrt(n)) for the stat, and then using 2 x standard error for 95% CI
 # note this also doesn't match exactly the boot package CI output
+# note that the standard error here is the sd of the bootstrap sampling distribution
+# we don't need to approximate it via sd / sqrt(n) of a single sample
+# see slide 14: https://info.montgomerycollege.edu/_documents/faculty/maronne/math117/book-lock/ppt/lock3-4.pdf
 boot_diff_in_means$t %>%
-        tibble(stat = .) %>%
+        data.frame(stat = .) %>%
+        as_tibble() %>%
         summarize(mean = mean(stat),
-                  standard_error = sd(stat) / sqrt(n()),
+                  standard_error = sd(stat),
                   conf_int_lower = mean - (2 * standard_error),
                   conf_int_upper = mean + (2 * standard_error))
 
@@ -598,7 +605,6 @@ starwars %>%
 
 # resamples are row_numbers (for efficiency) that point under the hood to the data, 
 # so viewed as integers it shows just row_numbers, but viewed as tbl or df they show the data
-resample(starwars)
 resamples <- resample(starwars, idx = 1:10)
 resamples
 resamples %>% as.integer()
@@ -607,35 +613,15 @@ starwars %>% slice(1:10)
 
 # can also use resample_bootstrap to get indices for a single bootstrap resample
 resample_bootstrap(starwars)
-resample_bootstrap(starwars) %>% as_tibble()
-
-# also can resample based on exclusive partitions of data
-# note that the partition size is limited so that the partitions are exclusive of each other
-# ie can't reuse observations to get partitions with total size > 100% of data
-resample_partition(starwars, p = c(test = 0.5, train = 0.5))
-resample_partition(starwars, p = c(test = 0.5, train = 0.5))[[1]] %>% as_tibble()
-
-resample_partition(starwars, p = c(a = .2, b = .2, c = .2, d = .2, e = .2))
-resample_partition(starwars, p = c(a = .9, b = .9, c = .9))
-
-# also can resample based on random permutations of one or more variables
-permute_1 <- starwars %>% select(name, gender, mass, height) %>% resample_permutation(columns = c("mass", "height"))
-permute_1
-permute_1 %>% as_tibble()
-starwars %>% select(name, gender, mass, height)
-
-
-#//////////////////////
-
 
 # more useful/direct to use bootstraps() and get multiple bootstarp resample indices
 
 # get bootstraps
-bootstrap_samples <- starwars %>% bootstrap(, n = 1000)
+bootstrap_samples <- starwars %>% bootstrap(n = 1000)
 bootstrap_samples
 bootstrap_samples %>% slice(1) %>% 
         pull(strap) %>%
-        as.data.frame() %>%
+        as.data.frame() %>% 
         as_tibble()
 
 # create get_diff_in_means()
@@ -670,21 +656,14 @@ diff_in_means_boot_dist %>%
         ggplot(data = ., mapping = aes(x = diff_in_means)) + geom_density()
 
 # get CI with standard error method
+# note that the standard error here is the sd of the bootstrap sampling distribution
+# we don't need to approximate it via sd / sqrt(n) of a single sample
+# see slide 14: https://info.montgomerycollege.edu/_documents/faculty/maronne/math117/book-lock/ppt/lock3-4.pdf
 diff_in_means_boot_dist %>%
         summarize(mean = mean(diff_in_means),
-                  standard_error = sd(diff_in_means) / sqrt(n()),
+                  standard_error = sd(diff_in_means),
                   conf_int_lower = mean - (2 * standard_error),
                   conf_int_upper = mean + (2 * standard_error))
-
-# actual value in data
-starwars %>%
-        filter(gender %in% c("masculine", "feminine")) %>%
-        group_by(gender) %>%
-        summarize(mean_height = mean(height, na.rm = TRUE)) %>%
-        ungroup() %>%
-        pivot_wider(names_from = gender, values_from = mean_height) %>%
-        mutate(diff_in_means = feminine - masculine) %>%
-        select(diff_in_means)
 
 
 #////////////////////////////////////////////////////////////////////////////////////////////////////
