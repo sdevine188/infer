@@ -251,6 +251,11 @@ fli_small %>%
 
 # theory-based confidence intervals for means ####
 
+# see get_conf_int() in assorted_helper_functions
+
+?get_confidence_interval
+# distribution = "t": point_estimate should be the output of calculate() with stat = "mean" or stat = "diff in means"
+# distribution = "z": point_estimate should be the output of calculate() with stat = "prop" or stat = "diff in props"
 
 sample_mean <- gss %>%
         specify(response = hours) %>%
@@ -281,6 +286,11 @@ gss %>% summarise(mean_hours = mean(hours),
 
 # theory-based confidence intervals for proportions ####
 
+# see get_conf_int() in assorted_helper_functions
+
+?get_confidence_interval
+# distribution = "t": point_estimate should be the output of calculate() with stat = "mean" or stat = "diff in means"
+# distribution = "z": point_estimate should be the output of calculate() with stat = "prop" or stat = "diff in props"
 
 # note that calculate(stat = "prop") requires a categorical variable, not a numeric dummy
 gss %>%
