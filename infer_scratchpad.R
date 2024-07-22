@@ -104,6 +104,8 @@ h2_arr_delay_mean <- mean(h2_arr_delay, na.rm = TRUE)
 mean_diff <- h1_arr_delay_mean - h2_arr_delay_mean
 mean_diff
 
+# calculate manual approximation
+# note that manual method shown relies on z score of 1.96, but for small_n groups the critical value calculated w infer will be larger
 mean_diff - 1.96 * std_error
 mean_diff + 1.96 * std_error
 
@@ -129,6 +131,12 @@ output %>% summarize(std_error = (conf.high - estimate) / 1.96)
 # conduct same theoretical t_test with infer ####
 # note t_test() gives more info like t_stat, t_df, p_value, alternative, and ci - though not the diff_in_means or std_error
 # to get actual t_stat instead, use calculate(stat = "t") as shown below 
+observed_diff_in_means <- fli_small %>% select(arr_delay, half_year) %>% 
+        filter(!is.na(arr_delay), !is.na(half_year)) %>%
+        specify(arr_delay ~ half_year) %>% 
+        calculate(stat = "diff in means", order = c("h1", "h2"))
+observed_diff_in_means
+
 t_test_results <- fli_small %>% 
         # t_test(formula = arr_delay ~ half_year, alternative = "two_sided", order = c("h1", "h2"))
         t_test(response = arr_delay, explanatory = half_year, alternative = "two_sided", order = c("h1", "h2"))
@@ -223,7 +231,8 @@ prop.test(x = c(h1_x, h2_x), n = c(h1_n, h2_n), alternative = "two.sided",
 #////////////////////////////
 
 
-# manually 
+# calculate manual approximation
+# note that manual method shown relies on z score of 1.96, but for small_n groups the critical value calculated w infer will be larger
 
 # https://online.stat.psu.edu/stat200/book/export/html/193
 
@@ -271,12 +280,17 @@ get_confidence_interval(x = sampling_dist,
                         level = .95, 
                         point_estimate = sample_mean)
 
-# calculate manually 
+# using t.test
+t.test(x = gss %>% select(hours)) %>% tidy()
+
+# calculate manual approximation
+# note that manual method shown relies on z score of 1.96, but for small_n groups the critical value calculated w infer will be larger
+
 # https://online.stat.psu.edu/stat500/lesson/5/5.4/5.4.1
 # https://online.stat.psu.edu/stat500/lesson/5/5.3/5.3.1
 
-gss %>% summarise(mean_hours = mean(hours),
-                  standard_error = sd(hours) / sqrt(n())) %>%
+gss %>% summarise(mean_hours = mean(hours, na.rm = TRUE),
+                  standard_error = sd(hours, na.rm = TRUE) / sqrt( sum(!is.na(hours)) )) %>%
         mutate(conf_int_lower = mean_hours - (1.96 * standard_error),
                conf_int_upper = mean_hours + (1.96 * standard_error))
 
@@ -307,7 +321,7 @@ gss %>%
 
 
 
-
+# w infer
 sample_prop <- gss %>%
         mutate(degree_flag = case_when(college == "degree" ~ "1",
                                        TRUE ~ "0")) %>%
@@ -326,14 +340,100 @@ get_confidence_interval(x = sampling_dist,
                         level = .95, 
                         point_estimate = sample_prop)
 
-# calculate manually
+
+# using prop.test
+# note that prop.test uses wilson score confidence interval for single proportions
+# https://stats.stackexchange.com/questions/183225/confidence-interval-from-rs-prop-test-differs-from-hand-calculation-and-resul
+prop.test(x = gss %>% filter(college == "degree") %>% nrow(),
+          n = gss %>% filter(!is.na(college)) %>% nrow()) %>% tidy()
+                                             
+
+# calculate manual approximation
+# note that manual method shown relies on z score of 1.96, but for small_n groups the critical value calculated w infer will be larger
+# note that NA values should be dropped before getting n denominator in proportion
+
 # https://online.stat.psu.edu/stat500/lesson/5/5.4/5.4.1
 # https://online.stat.psu.edu/stat500/lesson/5/5.3/5.3.1
 
-gss %>% summarise(prop_degree = sum(college == "degree") / n(),
-                  standard_error = sqrt( (prop_degree * (1 - prop_degree)) / n() )) %>%
+gss %>% summarise(n_valid = sum(!is.na(college)),
+                  degree_count = sum(college == "degree"),
+                  prop_degree = degree_count / n_valid,
+                  standard_error = sqrt( (prop_degree * (1 - prop_degree)) / n_valid )) %>%
         mutate(conf_int_lower = prop_degree - (1.96 * standard_error),
                conf_int_upper = prop_degree + (1.96 * standard_error))
+
+
+#/////////////////////////
+
+
+# can replicate prop.test wilson score for single proportions
+# https://stats.stackexchange.com/questions/183225/confidence-interval-from-rs-prop-test-differs-from-hand-calculation-and-resul
+prop.test(319, 1100, conf.level = 0.99, correct = FALSE)$conf.int
+
+p <- 319/1100
+n <- 1100
+z <- qnorm(0.995)
+(2 * n * p + z^2 + c(-1, 1) * z * sqrt(z^2 + 4 * n * p * (1 - p))) /
+        (2 * (n + z^2))
+
+
+#////////////////////////
+
+
+# prop conf_int when var has NA values
+
+# note that NA values should be dropped before getting n denominator in proportion
+starwars %>% 
+        mutate(mass_not_na_flag = case_when(!is.na(mass) ~ 1, TRUE ~ 0),
+               mass_over_80 = case_when(mass > 80 ~ 1, mass <= 80 ~ 0)) %>%
+        summarize(n = n(),
+                  n_valid = sum(!is.na(mass)),
+                  n_valid_2 = sum(mass_not_na_flag),
+                  mass_over_80_sum = sum(mass_over_80, na.rm = TRUE),
+                  mass_prop_w_n = mass_over_80_sum / n,
+                  mass_prop_w_n_valid = mass_over_80_sum / n_valid,
+                  standard_error = sqrt( (mass_prop_w_n_valid * (1 - mass_prop_w_n_valid)) / n_valid ),
+                  conf_int_lower = mass_prop_w_n_valid - (1.96 * standard_error),
+                  conf_int_upper = mass_prop_w_n_valid + (1.96 * standard_error)) 
+
+
+starwars_2 <- starwars %>% mutate(mass_over_80 = case_when(mass > 80 ~ 1, mass <= 80 ~ 0)) 
+starwars_2 %>% skim()        
+
+# w prop.test
+prop.test(x = starwars_2 %>% filter(mass_over_80 == 1) %>% nrow(),
+          n = starwars_2 %>% filter(!is.na(mass_over_80)) %>% nrow()) %>% tidy()
+
+# w infer
+# note that infer will throw error below if response variable has NAs, or has over two categories
+# "Error: A proportion is not well-defined for a multinomial categorical response variable (mass_over_80) and no explanatory variable.
+sample_prop <- starwars_2 %>%
+        mutate(mass_over_80 = as.character(mass_over_80)) %>%
+        filter(!is.na(mass_over_80)) %>%
+        specify(response = mass_over_80, success = "1") %>%
+        calculate(stat = "prop")
+sample_prop
+
+sampling_dist <- starwars_2 %>%
+        mutate(mass_over_80 = as.character(mass_over_80)) %>%
+        filter(!is.na(mass_over_80)) %>%
+        specify(response = mass_over_80, success = "1") %>%
+        assume("z")
+sampling_dist
+
+get_confidence_interval(x = sampling_dist, 
+                        level = .95, 
+                        point_estimate = sample_prop)
+
+# note prop.test is better than using infer, because of wilson score improved ci coverage
+# and also prop.test will correctly return 0% for data where var has only 0 values
+# but infer will throw error that "1 is not a valid level of {var}" 
+starwars_2 %>%
+        mutate(mass_over_80 = as.character(mass_over_80)) %>%
+        filter(!is.na(mass_over_80)) %>%
+        filter(name == "Luke Skywalker") %>%
+        specify(response = mass_over_80, success = "1") %>%
+        calculate(stat = "prop")
 
 
 #////////////////////////////////////////////////////////////////////////////////////////////////////
